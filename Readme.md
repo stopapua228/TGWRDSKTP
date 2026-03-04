@@ -157,11 +157,16 @@ npm run dev
    | $$        | $$$/ \  $$$       /$$  \ $$
   /$$$$$$      | $$/   \  $$      |  $$$$$$/
  |______/      |__/     \__/       \______/ 
-                                                
-                                                
-             $WAG_TECHNOLOGIES_v1.0     
+                                               
+```                                            
+                                               
+
+
+
+```text
+   $WAG_TECHNOLOGIES_v1.0 
+```    
                            
       ✧ ᴍᴀᴅᴇ ʙʏ IWANNASOME ꜰᴇᴀᴛ. dvunya ꜰᴇᴀᴛ TeMyCh ✧
       
-```
-</div>
+</div> 
