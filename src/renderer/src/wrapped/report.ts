@@ -2,6 +2,10 @@ import { asNumber, asRecord, asString, getArray, getNumber, getRecord, getString
 
 export type PeriodKey = 'all_time' | 'year'
 
+export function asReport(data: unknown): Record<string, unknown> | null {
+  return asRecord(data)
+}
+
 export function getMeta(report: unknown): Record<string, unknown> {
   return asRecord(isRecord(report) ? report.meta : null) ?? {}
 }

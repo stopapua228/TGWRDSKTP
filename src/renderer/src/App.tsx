@@ -117,20 +117,73 @@ export default function App(): JSX.Element {
     setPeriod((p) => (p === 'all_time' ? 'year' : 'all_time'))
   }, [])
 
-  const loadReport = useCallback(async (dbPathArg?: string): Promise<boolean> => {
-    const res = await window.tgwr.loadReport(dbPathArg)
-    if (!res.ok) return false
+const loadReport = useCallback(async (dbPathArg?: string, isStartup = false): Promise<boolean> => {
+    try {
+      console.log('[TGWR] Попытка загрузки отчета. Путь:', dbPathArg, '| Старт:', isStartup)
+      const res = await window.tgwr.loadReport(dbPathArg)
+      console.log('[TGWR] Ответ от бекенда:', res)
 
-    setDbPath(res.db_path)
-    setReportPath(res.report_path)
-    setReport(res.report)
-    setView('slides')
-    return true
+      if (!res || !res.ok) {
+        if (!isStartup) {
+          setReportBuild(prev => ({
+            ...prev,
+            running: false,
+            error: `Ошибка бекенда: ${res?.error || 'отчет не найден'}`
+          }))
+        }
+        return false
+      }
+
+      if (!res.report) {
+        if (!isStartup) {
+          setReportBuild(prev => ({
+            ...prev,
+            running: false,
+            error: `Отчет загружен, но данные отсутствуют.`
+          }))
+        }
+        return false
+      }
+
+      // Страховка: если бекенд отдал JSON строкой, парсим его
+      let parsedReport = res.report
+      if (typeof parsedReport === 'string') {
+        try {
+          parsedReport = JSON.parse(parsedReport)
+        } catch (e) {
+          if (!isStartup) {
+            setReportBuild(prev => ({ ...prev, running: false, error: 'Ошибка парсинга JSON отчета.' }))
+          }
+          return false
+        }
+      }
+
+      console.log('[TGWR] Отчет успешно распарсен, переключаем на слайды!', parsedReport)
+
+      setDbPath(res.db_path)
+      setReportPath(res.report_path)
+      setReport(parsedReport) // Передаем именно объект!
+      setView('slides')
+
+      // Сбрасываем ошибку, если загрузилось
+      setReportBuild(prev => ({ ...prev, running: false, error: undefined }))
+      return true
+    } catch (err) {
+      console.error('[TGWR] Ошибка IPC:', err)
+      if (!isStartup) {
+        setReportBuild(prev => ({
+          ...prev,
+          running: false,
+          error: `Критическая ошибка IPC: ${String(err)}`
+        }))
+      }
+      return false
+    }
   }, [])
 
-  // Try to load existing report.json on startup.
+// Try to load existing report.json on startup.
   useEffect(() => {
-    void loadReport()
+    void loadReport(undefined, true) // true = это запуск, прячем красную ошибку
   }, [loadReport])
 
   // Subscribe to worker events

@@ -1990,6 +1990,109 @@ def _longest_streak_days(conn: sqlite3.Connection, start_ts: int, end_ts: int) -
     return {"length_days": int(best_len), "start_date": best_start, "end_date": best_end}
 
 
+def _longest_person_streak(conn: sqlite3.Connection, start_ts: int, end_ts: int) -> Optional[Dict[str, Any]]:
+    base, p = _period_where_clause(start_ts, end_ts)
+
+    # Вытаскиваем твой ID, чтобы исключить чат с самим собой
+    self_from_id = meta_get(conn, "self_from_id") or "UNKNOWN_SELF"
+
+    # Фильтруем Избранное, ботов и самого себя
+    q = (
+        f"SELECT c.peer_from_id, "
+        f"       MAX(c.name) AS display_name, "
+        f"       date((m.date_ts + {MSK_OFFSET_SECONDS}), 'unixepoch') AS d "
+        f"FROM messages m JOIN chats c ON m.chat_pk = c.chat_pk "
+        f"WHERE m.is_service = 0 "
+        f"  AND c.peer_from_id IS NOT NULL "
+        f"  AND TRIM(c.peer_from_id) != '' "
+        f"  AND c.peer_from_id != ? "
+        f"  AND c.peer_from_id != 'user1098898489' " # <--- ПЕРМАБАН ЗДЕСЬ
+        f"  AND (c.name IS NULL OR (c.name NOT LIKE '%Saved Messages%' AND c.name NOT LIKE '%Избранное%')) "
+        f"  AND {base} "
+        f"GROUP BY c.peer_from_id, d "
+        f"ORDER BY c.peer_from_id, d;"
+    )
+
+    # Передаем твой ID первым параметром в запрос
+    params = (self_from_id,) + p
+
+    best_len = 0
+    best_start = None
+    best_end = None
+    best_peer = None
+    best_name = None
+
+    current_peer = None
+    current_name = None
+    current_len = 0
+    current_start = None
+    prev_date_obj = None
+
+    def _parse(d_str: str) -> datetime:
+        return datetime.strptime(d_str, "%Y-%m-%d")
+
+    for row in conn.execute(q, params):
+        if _CANCEL_EVENT.is_set():
+            raise CancelledError()
+
+        peer_id = row[0]
+        display_name = row[1] if isinstance(row[1], str) else ""
+        d_str = row[2]
+
+        if not isinstance(d_str, str):
+            continue
+
+        d_obj = _parse(d_str)
+
+        if peer_id != current_peer:
+            if current_len > best_len:
+                best_len = current_len
+                best_start = current_start
+                best_end = prev_date_obj.strftime("%Y-%m-%d") if prev_date_obj else current_start
+                best_peer = current_peer
+                best_name = current_name
+
+            current_peer = peer_id
+            current_name = display_name
+            current_len = 1
+            current_start = d_str
+            prev_date_obj = d_obj
+        else:
+            if prev_date_obj and (d_obj - prev_date_obj).days == 1:
+                current_len += 1
+            else:
+                if current_len > best_len:
+                    best_len = current_len
+                    best_start = current_start
+                    best_end = prev_date_obj.strftime("%Y-%m-%d")
+                    best_peer = current_peer
+                    best_name = current_name
+
+                current_len = 1
+                current_start = d_str
+
+            prev_date_obj = d_obj
+
+    # Последняя проверка после выхода из цикла
+    if current_len > best_len:
+        best_len = current_len
+        best_start = current_start
+        best_end = prev_date_obj.strftime("%Y-%m-%d") if prev_date_obj else current_start
+        best_peer = current_peer
+        best_name = current_name
+
+    if best_len <= 0 or not best_peer:
+        return None
+
+    return {
+        "length_days": int(best_len),
+        "start_date": best_start,
+        "end_date": best_end,
+        "peer_from_id": best_peer,
+        "display_name": best_name,
+    }
+
+
 def _text_metrics_sent(conn: sqlite3.Connection, start_ts: int, end_ts: int) -> Dict[str, Any]:
     base, p = _period_where_clause(start_ts, end_ts)
     q = (
@@ -2317,6 +2420,10 @@ def _compute_period_metrics(
     silence = _longest_silence_gap(conn, start_ts, end_ts)
     streak = _longest_streak_days(conn, start_ts, end_ts)
 
+    person_streak = _longest_person_streak(conn, start_ts, end_ts)
+
+    textm = _text_metrics_sent(conn, start_ts, end_ts)
+
     textm = _text_metrics_sent(conn, start_ts, end_ts)
     media = _media_counts(conn, start_ts, end_ts)
 
@@ -2398,6 +2505,7 @@ def _compute_period_metrics(
         else None,
         "longest_silence_gap": silence,
         "longest_streak_days": streak,
+        "longest_person_streak": person_streak,
         "top_10_people_by_messages": _top_10_people_by_messages(people),
         "top_10_people_by_time_span": _top_10_people_by_time_span(people),
         "top_10_people_by_mutuality": _top_10_people_by_mutuality(people),

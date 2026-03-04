@@ -5,14 +5,31 @@ import { getAchievements } from '../report'
 import type { SlideCommonProps } from '../slideTypes'
 import { getBoolean, getNumber, getString } from '../safe'
 
-export default function Slide19Achievements({ report }: SlideCommonProps): JSX.Element {
+export default function Slide19Achievements({ report, exporting }: SlideCommonProps): JSX.Element {
   const achievements = getAchievements(report)
 
   return (
-    <SlideFrame kicker="Achievements" title="Ачивки" subtitle="Небольшие титулы за стиль общения." footerHint="Свайп/скролл по горизонтали." >
+    <SlideFrame
+      kicker="Achievements"
+      title="Ачивки"
+      subtitle="Небольшие титулы за стиль общения."
+      // Скрываем подсказку про скролл на экспорте, чтобы не смущать людей в PDF
+      footerHint={exporting ? undefined : "Свайп/скролл по горизонтали."}
+    >
       <div className="flex h-full flex-col justify-center">
         <div className="rounded-[44px] border border-white/10 bg-white/5 p-10">
-          <div className="flex gap-6 overflow-x-auto pb-4">
+
+          {/* ГЛАВНОЕ ИЗМЕНЕНИЕ:
+              Если идет экспорт, меняем overflow-x-auto на flex-wrap.
+              Так ачивки выстроятся в несколько рядов и все попадут в кадр.
+          */}
+          <div className={[
+            "flex gap-6",
+            exporting
+              ? "flex-wrap justify-center overflow-visible"
+              : "overflow-x-auto pb-4 custom-scrollbar"
+          ].join(' ')}>
+
             {achievements.length === 0 ? (
               <div className="text-[16px] text-[rgba(var(--tgwr-muted-rgb),0.9)]">Пока пусто.</div>
             ) : (
@@ -25,11 +42,12 @@ export default function Slide19Achievements({ report }: SlideCommonProps): JSX.E
                 return (
                   <motion.div
                     key={getString(a, 'id', String(idx))}
-                    initial={{ opacity: 0, y: 8 }}
+                    // Отключаем анимацию при экспорте, чтобы поймать финальное состояние
+                    initial={exporting ? { opacity: 1, y: 0 } : { opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: Math.min(0.25, idx * 0.03) }}
+                    transition={{ duration: 0.25, delay: exporting ? 0 : Math.min(0.25, idx * 0.03) }}
                     className={[
-                      'min-w-[320px] max-w-[320px] rounded-[34px] border px-7 py-7',
+                      'min-w-[320px] max-w-[320px] rounded-[34px] border px-7 py-7 transition-all',
                       earned
                         ? 'border-[rgba(var(--tgwr-accent1-rgb),0.35)] bg-[rgba(var(--tgwr-accent1-rgb),0.10)] shadow-[0_0_34px_rgba(var(--tgwr-accent1-rgb),0.12)]'
                         : 'border-white/10 bg-white/5'

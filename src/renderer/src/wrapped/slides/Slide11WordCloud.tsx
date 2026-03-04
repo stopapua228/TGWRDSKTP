@@ -5,7 +5,7 @@ import { clamp } from '../format'
 import { getPeriod, getWordCloud } from '../report'
 import type { SlideCommonProps } from '../slideTypes'
 
-export default function Slide11WordCloud({ report, period }: SlideCommonProps): JSX.Element {
+export default function Slide11WordCloud({ report, period, exporting }: SlideCommonProps): JSX.Element {
   const p = getPeriod(report, period)
   const words = useMemo(() => getWordCloud(p).slice(0, 50), [p])
 
@@ -27,24 +27,34 @@ export default function Slide11WordCloud({ report, period }: SlideCommonProps): 
   }
 
   return (
-    <SlideFrame kicker="Words" title="Слова года" subtitle="Топ-слова (без стоп-слов и ссылок). Простая word-cloud визуализация." >
+    <SlideFrame
+      kicker="Words"
+      title="Слова года"
+      subtitle="Топ-слова (без стоп-слов и ссылок). Простая word-cloud визуализация."
+    >
       <div className="flex h-full flex-col justify-center">
         <div className="rounded-[44px] border border-white/10 bg-white/5 p-10">
           <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
             {words.length === 0 ? (
-              <div className="text-[16px] text-[rgba(var(--tgwr-muted-rgb),0.9)]">Пока пусто — нет текста в исходящих.</div>
+              <div className="text-[16px] text-[rgba(var(--tgwr-muted-rgb),0.9)]">
+                Пока пусто — нет текста в исходящих.
+              </div>
             ) : (
               words.map((w, idx) => (
                 <motion.span
                   key={`${w.word}-${idx}`}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, delay: Math.min(0.22, idx * 0.01) }}
+                  // На экспорте отключаем анимацию влета, чтобы не поймать пустой кадр
+                  initial={exporting ? { opacity: 0.92, y: 0 } : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 0.92, y: 0 }}
+                  // Убираем ступенчатую задержку (stagger) для мгновенного рендера в файл
+                  transition={{
+                    duration: 0.25,
+                    delay: exporting ? 0 : Math.min(0.22, idx * 0.01)
+                  }}
                   style={{
                     fontSize: `${sizeFor(w.weight)}px`,
                     lineHeight: 1,
                     letterSpacing: '-0.02em',
-                    opacity: 0.92,
                     transform: `translateZ(0)`
                   }}
                   className={[

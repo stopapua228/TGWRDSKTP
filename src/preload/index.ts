@@ -1,13 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { IpcRendererEvent } from 'electron'
 
 const IPC_WORKER_EVENT = 'tgwr:worker-event' as const
 const IPC_WORKER_SEND = 'tgwr:worker-send' as const
 const IPC_PICK_EXPORT_DIR = 'tgwr:pick-export-dir' as const
+const IPC_PICK_OUTPUT_DIR = 'tgwr:pick-output-dir' as const
+const IPC_WRITE_OUTPUT_FILE = 'tgwr:write-output-file' as const
 const IPC_LOAD_REPORT = 'tgwr:load-report' as const
 
-export type WorkerEventPayload = unknown
-export type WorkerEventCallback = (payload: WorkerEventPayload) => void
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export type LoadReportResult =
   | {
@@ -18,63 +20,86 @@ export type LoadReportResult =
     }
   | {
       ok: false
-      db_path: string
-      report_path: string
-      error: string
+      db_path?: string
+      report_path?: string
+      error?: string
+    }
+
+export type WriteOutputFileResult =
+  | {
+      ok: true
+      path: string
+    }
+  | {
+      ok: false
+      error?: string
     }
 
 export interface TgwrApi {
-  onWorkerEvent: (cb: WorkerEventCallback) => () => void
+  onWorkerEvent: (cb: (payload: unknown) => void) => () => void
   sendWorker: (cmdObj: Record<string, unknown>) => void
+
   pickExportDir: () => Promise<string | null>
+  pickOutputDir: () => Promise<string | null>
+
+  writeOutputFile: (dirPath: string, filename: string, bytes: Uint8Array) => Promise<WriteOutputFileResult>
+
   loadReport: (dbPath?: string) => Promise<LoadReportResult>
 }
 
 const api: TgwrApi = {
-  onWorkerEvent: (cb: WorkerEventCallback) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      cb(payload)
-    }
-
+  onWorkerEvent: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => cb(payload)
     ipcRenderer.on(IPC_WORKER_EVENT, listener)
-
-    return () => {
-      ipcRenderer.removeListener(IPC_WORKER_EVENT, listener)
-    }
+    return () => ipcRenderer.removeListener(IPC_WORKER_EVENT, listener)
   },
 
-  sendWorker: (cmdObj: Record<string, unknown>) => {
+  sendWorker: (cmdObj) => {
     ipcRenderer.send(IPC_WORKER_SEND, cmdObj)
   },
 
-  pickExportDir: async (): Promise<string | null> => {
-    const res: unknown = await ipcRenderer.invoke(IPC_PICK_EXPORT_DIR)
-    return typeof res === 'string' && res.length > 0 ? res : null
+  pickExportDir: async () => {
+    const res = await ipcRenderer.invoke(IPC_PICK_EXPORT_DIR)
+    return typeof res === 'string' ? res : null
   },
 
-  loadReport: async (dbPath?: string): Promise<LoadReportResult> => {
-    const payload = typeof dbPath === 'string' && dbPath.trim().length > 0 ? { db_path: dbPath } : {}
-    const res: unknown = await ipcRenderer.invoke(IPC_LOAD_REPORT, payload)
+  pickOutputDir: async () => {
+    const res = await ipcRenderer.invoke(IPC_PICK_OUTPUT_DIR)
+    return typeof res === 'string' ? res : null
+  },
 
-    // We intentionally keep validation minimal; renderer handles missing fields defensively.
-    if (typeof res === 'object' && res !== null) {
-      const r = res as { ok?: unknown; db_path?: unknown; report_path?: unknown; report?: unknown; error?: unknown }
-      const ok = r.ok === true
-      const db_path = typeof r.db_path === 'string' ? r.db_path : ''
-      const report_path = typeof r.report_path === 'string' ? r.report_path : ''
-      if (ok) {
-        return { ok: true, db_path, report_path, report: r.report }
+  writeOutputFile: async (dirPath, filename, bytes) => {
+    const res = await ipcRenderer.invoke(IPC_WRITE_OUTPUT_FILE, {
+      dir_path: dirPath,
+      filename,
+      bytes
+    })
+
+    if (isPlainObject(res) && typeof res.ok === 'boolean') {
+      if (res.ok) {
+        return {
+          ok: true,
+          path: typeof res.path === 'string' ? res.path : ''
+        }
       }
-      const error = typeof r.error === 'string' ? r.error : 'Failed to load report'
-      return { ok: false, db_path, report_path, error }
+
+      return {
+        ok: false,
+        error: typeof res.error === 'string' ? res.error : 'Unknown error'
+      }
     }
 
-    return {
-      ok: false,
-      db_path: '',
-      report_path: '',
-      error: 'Invalid IPC response'
+    return { ok: false, error: 'Invalid response from main process' }
+  },
+
+  loadReport: async (dbPath?: string) => {
+    const res = await ipcRenderer.invoke(IPC_LOAD_REPORT, {
+      db_path: dbPath
+    })
+    if (isPlainObject(res) && typeof res.ok === 'boolean') {
+      return res as LoadReportResult
     }
+    return { ok: false, error: 'Invalid response from main process' }
   }
 }
 

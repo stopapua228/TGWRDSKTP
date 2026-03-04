@@ -5,7 +5,7 @@ import { clamp, formatInt } from '../format'
 import { getPeriod, getReceivedMessages, getSentMessages, getTotalMessages } from '../report'
 import type { SlideCommonProps } from '../slideTypes'
 
-export default function Slide03SentVsReceived({ report, period }: SlideCommonProps): JSX.Element {
+export default function Slide03SentVsReceived({ report, period, exporting }: SlideCommonProps): JSX.Element {
   const p = getPeriod(report, period)
   const sent = getSentMessages(p)
   const received = getReceivedMessages(p)
@@ -15,6 +15,8 @@ export default function Slide03SentVsReceived({ report, period }: SlideCommonPro
     if (total <= 0) return 0
     return clamp(sent / total, 0, 1)
   }, [sent, total])
+
+  const sentPct = Math.round(sentRatio * 100)
 
   return (
     <SlideFrame kicker="Direction" title="Ты пишешь или тебе пишут" subtitle="Соотношение исходящих и входящих." >
@@ -42,7 +44,7 @@ export default function Slide03SentVsReceived({ report, period }: SlideCommonPro
                 Balance
               </div>
               <div className="mt-2 text-[18px] font-semibold text-slate-100">
-                {Math.round(sentRatio * 100)}% sent · {Math.round((1 - sentRatio) * 100)}% received
+                {sentPct}% sent · {100 - sentPct}% received
               </div>
             </div>
             <div className="text-right">
@@ -54,10 +56,13 @@ export default function Slide03SentVsReceived({ report, period }: SlideCommonPro
           </div>
 
           <div className="mt-5 h-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
+            {/* ГЛАВНОЕ ИЗМЕНЕНИЕ: Прогресс-бар
+                Если идет экспорт — сразу выставляем финальную ширину.
+            */}
             <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.round(sentRatio * 100)}%` }}
-              transition={{ duration: 0.55 }}
+              initial={exporting ? { width: `${sentPct}%` } : { width: 0 }}
+              animate={{ width: `${sentPct}%` }}
+              transition={{ duration: exporting ? 0 : 0.55, ease: "easeOut" }}
               className="h-full rounded-full bg-[linear-gradient(90deg,rgba(var(--tgwr-accent1-rgb),0.75),rgba(var(--tgwr-accent2-rgb),0.65))] shadow-[0_0_26px_rgba(var(--tgwr-accent1-rgb),0.18)]"
             />
           </div>

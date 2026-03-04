@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import { constants as fsConstants, promises as fsp, existsSync } from 'node:fs'
+import { existsSync, constants as fsConstants, promises as fsp } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -11,6 +11,8 @@ const __dirname = dirname(__filename)
 const IPC_WORKER_EVENT = 'tgwr:worker-event' as const
 const IPC_WORKER_SEND = 'tgwr:worker-send' as const
 const IPC_PICK_EXPORT_DIR = 'tgwr:pick-export-dir' as const
+const IPC_PICK_OUTPUT_DIR = 'tgwr:pick-output-dir' as const
+const IPC_WRITE_OUTPUT_FILE = 'tgwr:write-output-file' as const
 const IPC_LOAD_REPORT = 'tgwr:load-report' as const
 
 type JsonPrimitive = string | number | boolean | null
@@ -54,11 +56,6 @@ function nowIso(): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function errToMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
 }
 
 function canSendToRenderer(): boolean {
@@ -120,7 +117,7 @@ function sendToWorker(cmdObj: unknown): void {
   try {
     line = JSON.stringify(cmdObj)
   } catch (err) {
-    const msg = errToMessage(err)
+    const msg = err instanceof Error ? err.message : String(err)
     emitToRenderer({
       type: 'worker_send_fail',
       message: 'Failed to serialize command',
@@ -133,7 +130,7 @@ function sendToWorker(cmdObj: unknown): void {
   try {
     workerProc.stdin.write(`${line}\n`)
   } catch (err) {
-    const msg = errToMessage(err)
+    const msg = err instanceof Error ? err.message : String(err)
     emitStatus('fail', `Failed to write to worker stdin: ${msg}`)
   }
 }
@@ -155,7 +152,7 @@ function handleWorkerStdoutChunk(text: string): void {
     try {
       parsed = JSON.parse(line) as unknown
     } catch (err) {
-      const msg = errToMessage(err)
+      const msg = err instanceof Error ? err.message : String(err)
       emitToRenderer({
         type: 'worker_parse_error',
         message: msg,
@@ -248,23 +245,23 @@ function startWorker(): void {
 
     proc.once('error', onError)
 
-        proc.once('spawn', () => {
-          proc.removeListener('error', onError)
+    proc.once('spawn', () => {
+      proc.removeListener('error', onError)
 
-          workerProc = proc
-          workerCommandUsed = cmd
+      workerProc = proc
+      workerCommandUsed = cmd
 
-          attachWorker(proc)
+      attachWorker(proc)
 
-          emitStatus('ok', `Worker started (${cmd})`)
-          emitHost('info', 'Worker connected', {
-            cmd: workerCommandUsed ?? cmd,
-            scriptPath
-          })
+      emitStatus('ok', `Worker started (${cmd})`)
+      emitHost('info', 'Worker connected', {
+        cmd: workerCommandUsed ?? cmd,
+        scriptPath
+      })
 
-          sendToWorker({ cmd: 'ping' })
-        })
-
+      // Kick off a ping to detect the worker quickly in the UI.
+      sendToWorker({ cmd: 'ping' })
+    })
   }
 
   emitHost('info', 'Starting worker…', { script: scriptPath })
@@ -278,7 +275,8 @@ function createWindow(): void {
     join(__dirname, '../preload/index.mjs'),
     join(__dirname, '../preload/index.js')
   ]
-  const preloadPath = preloadCandidates.find((p) => existsSync(p)) ?? preloadCandidates[0]
+
+  const preloadPath = preloadCandidates.find((p) => existsSync(p))
 
   const win = new BrowserWindow({
     width: 1080,
@@ -335,8 +333,8 @@ async function isDirWritable(dirPath: string): Promise<boolean> {
 async function computeDbPath(): Promise<{ db_path: string; location: 'exe' | 'userData' }> {
   // In dev, process.execPath points to Electron inside node_modules, and writing the DB next to it is confusing.
   // Keep everything in userData during development; when packaged we can optionally prefer the exe dir.
-  const userDataDir = app.getPath('userData')
   if (!app.isPackaged) {
+    const userDataDir = app.getPath('userData')
     return { db_path: join(userDataDir, 'tgwr.db'), location: 'userData' }
   }
 
@@ -347,36 +345,106 @@ async function computeDbPath(): Promise<{ db_path: string; location: 'exe' | 'us
     return { db_path: candidate, location: 'exe' }
   }
 
+  const userDataDir = app.getPath('userData')
   return { db_path: join(userDataDir, 'tgwr.db'), location: 'userData' }
 }
 
+function isSafeFilename(name: string): boolean {
+  if (name.trim().length === 0) return false
+  if (name.includes('..')) return false
+  if (name.includes('/') || name.includes('\\')) return false
+  return true
+}
+
 ipcMain.handle(IPC_PICK_EXPORT_DIR, async () => {
-  const parent = mainWindow ?? BrowserWindow.getFocusedWindow() ?? null
-  const options: Electron.OpenDialogOptions = {
+  const parent = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined
+  const res = await dialog.showOpenDialog(parent, {
     title: 'Select Telegram Desktop Export folder',
     properties: ['openDirectory', 'dontAddToRecent'],
     buttonLabel: 'Select folder'
-  }
-
-  const res = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+  })
   if (res.canceled) return null
   return res.filePaths[0] ?? null
 })
 
-ipcMain.handle(IPC_LOAD_REPORT, async (_event, args: unknown) => {
-  const argDbPath = isPlainObject(args) ? args.db_path : undefined
-  const providedDbPath = typeof argDbPath === 'string' ? argDbPath.trim() : ''
+ipcMain.handle(IPC_PICK_OUTPUT_DIR, async () => {
+  const parent = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined
+  const res = await dialog.showOpenDialog(parent, {
+    title: 'Select folder to export TGWR slides',
+    properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
+    buttonLabel: 'Select folder'
+  })
+  if (res.canceled) return null
+  return res.filePaths[0] ?? null
+})
 
-  const chosen = providedDbPath.length > 0 ? { db_path: providedDbPath, location: 'exe' as const } : await computeDbPath()
-  const db_path = chosen.db_path
-  const report_path = join(dirname(db_path), 'report.json')
-
+ipcMain.handle(IPC_WRITE_OUTPUT_FILE, async (_event, payload: unknown) => {
   try {
-    const raw = await fsp.readFile(report_path, { encoding: 'utf8' })
-    const report = JSON.parse(raw) as JsonValue
+    if (!isPlainObject(payload)) {
+      return { ok: false, error: 'Invalid payload (expected object)' }
+    }
+
+    const dirPath = typeof payload.dir_path === 'string' ? payload.dir_path : ''
+    const filename = typeof payload.filename === 'string' ? payload.filename : ''
+    const bytesAny = payload.bytes as unknown
+
+    if (dirPath.trim().length === 0) return { ok: false, error: 'dir_path is required' }
+    if (!isSafeFilename(filename)) return { ok: false, error: 'Unsafe filename' }
+
+    // Normalize bytes
+    let bytes: Uint8Array
+    if (bytesAny instanceof Uint8Array) {
+      bytes = bytesAny
+    } else if (bytesAny instanceof ArrayBuffer) {
+      bytes = new Uint8Array(bytesAny)
+    } else if (ArrayBuffer.isView(bytesAny)) {
+      bytes = new Uint8Array(bytesAny.buffer, bytesAny.byteOffset, bytesAny.byteLength)
+    } else {
+      return { ok: false, error: 'bytes must be Uint8Array/ArrayBuffer' }
+    }
+
+    await fsp.mkdir(dirPath, { recursive: true })
+    const outPath = join(dirPath, filename)
+    await fsp.writeFile(outPath, Buffer.from(bytes))
+    return { ok: true, path: outPath }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: msg }
+  }
+})
+
+ipcMain.handle(IPC_LOAD_REPORT, async (_event, args: unknown) => {
+  try {
+    // 1. Страховка аргументов: фронтенд может передать строку или объект
+    let providedDbPath: string | null = null
+    if (typeof args === 'string') {
+      providedDbPath = args
+    } else if (isPlainObject(args) && typeof args.db_path === 'string') {
+      providedDbPath = args.db_path
+    }
+
+    let db_path: string
+    if (providedDbPath && providedDbPath.trim().length > 0) {
+      db_path = providedDbPath
+    } else {
+      const computed = await computeDbPath()
+      db_path = computed.db_path
+    }
+
+    // 2. ГЛАВНОЕ ИСПРАВЛЕНИЕ: Ищем именно 'report.json' в папке с базой данных, как это делает Python
+    const report_path = join(dirname(db_path), 'report.json')
+
+    if (!existsSync(report_path)) {
+      return { ok: false, db_path, report_path, error: `report.json not found at: ${report_path}` }
+    }
+
+    // 3. Читаем и отдаем
+    const txt = await fsp.readFile(report_path, { encoding: 'utf8' })
+    const report = JSON.parse(txt) as unknown
     return { ok: true, db_path, report_path, report }
   } catch (err) {
-    return { ok: false, db_path, report_path, error: errToMessage(err) }
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: msg }
   }
 })
 

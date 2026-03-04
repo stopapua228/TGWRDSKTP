@@ -5,7 +5,8 @@ import { formatHour, formatInt } from '../format'
 import { getMostActiveHour, getPeriod } from '../report'
 import type { SlideCommonProps } from '../slideTypes'
 
-export default function Slide05MostActiveHour({ report, period }: SlideCommonProps): JSX.Element {
+// Добавляем exporting в пропсы
+export default function Slide05MostActiveHour({ report, period, exporting }: SlideCommonProps): JSX.Element {
   const p = getPeriod(report, period)
   const h = getMostActiveHour(p)
 
@@ -16,10 +17,11 @@ export default function Slide05MostActiveHour({ report, period }: SlideCommonPro
     <SlideFrame kicker="Rhythm" title="Твой час силы" subtitle="В какое время ты активнее всего." >
       <div className="flex h-full flex-col justify-center">
         <div className="grid grid-cols-2 gap-8">
+          {/* Первая карточка: Час */}
           <motion.div
-            initial={{ opacity: 0, y: 14 }}
+            initial={exporting ? { opacity: 1, y: 0 } : { opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.06 }}
+            transition={{ duration: 0.35, delay: exporting ? 0 : 0.06 }}
             className="rounded-[40px] border border-white/10 bg-white/5 p-9"
           >
             <div className="text-xs font-semibold uppercase tracking-[0.38em] text-[rgba(var(--tgwr-muted-rgb),0.75)]">
@@ -29,10 +31,11 @@ export default function Slide05MostActiveHour({ report, period }: SlideCommonPro
             <div className="mt-4 text-[16px] text-[rgba(var(--tgwr-muted-rgb),0.9)]">по MSK</div>
           </motion.div>
 
+          {/* Вторая карточка: Сообщения */}
           <motion.div
-            initial={{ opacity: 0, y: 14 }}
+            initial={exporting ? { opacity: 1, y: 0 } : { opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.12 }}
+            transition={{ duration: 0.35, delay: exporting ? 0 : 0.12 }}
             className="rounded-[40px] border border-white/10 bg-white/5 p-9"
           >
             <div className="text-xs font-semibold uppercase tracking-[0.38em] text-[rgba(var(--tgwr-muted-rgb),0.75)]">

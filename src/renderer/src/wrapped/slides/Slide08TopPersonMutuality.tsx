@@ -6,7 +6,7 @@ import { getPeriod, getPersonName, getTop10, pickFirst } from '../report'
 import type { SlideCommonProps } from '../slideTypes'
 import { getNumber } from '../safe'
 
-export default function Slide08TopPersonMutuality({ report, period }: SlideCommonProps): JSX.Element {
+export default function Slide08TopPersonMutuality({ report, period, exporting }: SlideCommonProps): JSX.Element {
   const p = getPeriod(report, period)
   const arr = getTop10(p, 'top_10_people_by_mutuality')
   const top = pickFirst(arr)
@@ -17,12 +17,18 @@ export default function Slide08TopPersonMutuality({ report, period }: SlideCommo
   const ratio = top ? getNumber(top, 'imbalance_ratio', 0) : 0
 
   return (
-    <SlideFrame kicker="Balance" title="Самая взаимная переписка" subtitle="Минимальный дисбаланс sent/received при большом объёме." >
+    <SlideFrame
+      kicker="Balance"
+      title="Самая взаимная переписка"
+      subtitle="Минимальный дисбаланс sent/received при большом объёме."
+    >
       <div className="flex h-full flex-col justify-center">
         <motion.div
-          initial={{ opacity: 0, y: 14 }}
+          // При экспорте отключаем анимацию "взлета"
+          initial={exporting ? { opacity: 1, y: 0 } : { opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.06 }}
+          // Убираем задержку для мгновенного рендера в файл
+          transition={{ duration: 0.35, delay: exporting ? 0 : 0.06 }}
           className="rounded-[44px] border border-white/10 bg-white/5 p-10"
         >
           <div className="text-[22px] font-semibold text-slate-100">{name}</div>
