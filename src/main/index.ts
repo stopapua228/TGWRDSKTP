@@ -331,8 +331,6 @@ async function isDirWritable(dirPath: string): Promise<boolean> {
 }
 
 async function computeDbPath(): Promise<{ db_path: string; location: 'exe' | 'userData' }> {
-  // In dev, process.execPath points to Electron inside node_modules, and writing the DB next to it is confusing.
-  // Keep everything in userData during development; when packaged we can optionally prefer the exe dir.
   if (!app.isPackaged) {
     const userDataDir = app.getPath('userData')
     return { db_path: join(userDataDir, 'tgwr.db'), location: 'userData' }
