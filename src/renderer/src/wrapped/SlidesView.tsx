@@ -75,7 +75,7 @@ type ExportState = {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()))
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 async function capturePngBytes(node: HTMLElement): Promise<Uint8Array> {

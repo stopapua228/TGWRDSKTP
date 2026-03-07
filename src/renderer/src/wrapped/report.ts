@@ -1,6 +1,9 @@
 import { asNumber, asRecord, asString, getArray, getNumber, getRecord, getString, isRecord } from './safe'
 
 export type PeriodKey = 'all_time' | 'year'
+export type UnknownReport = unknown
+export type DailyActivityPoint = { date: string; count: number }
+export type HourlyActivityPoint = { hour: number; count: number }
 
 export function asReport(data: unknown): Record<string, unknown> | null {
   return asRecord(data)
@@ -46,6 +49,63 @@ export function getMostActiveHour(p: Record<string, unknown>): { value: string; 
   const m = getRecord(p, 'most_active_hour')
   if (!m) return null
   return { value: getString(m, 'value', ''), count: getNumber(m, 'count', 0) }
+}
+
+export function getMostActiveDay(p: Record<string, unknown>): { value: string; count: number } | null {
+  const m = getRecord(p, 'most_active_day')
+  if (!m) return null
+  return { value: getString(m, 'value', ''), count: getNumber(m, 'count', 0) }
+}
+
+export function getActiveDaysCount(p: Record<string, unknown>): number {
+  return getNumber(p, 'active_days_count', 0)
+}
+
+export function getDailyActivity(p: Record<string, unknown>): DailyActivityPoint[] {
+  const arr = getArray(p, 'daily_activity')
+  const out: DailyActivityPoint[] = []
+
+  for (let i = 0; i < arr.length; i += 1) {
+    const item = arr[i]
+
+    if (typeof item === 'number') {
+      out.push({ date: String(i), count: asNumber(item, 0) })
+      continue
+    }
+
+    const rec = asRecord(item)
+    if (!rec) continue
+
+    const date = getString(rec, 'date', '')
+    const count = getNumber(rec, 'count', 0)
+    out.push({ date, count })
+  }
+
+  return out.sort((a, b) => a.date.localeCompare(b.date))
+}
+
+export function getHourlyActivity(p: Record<string, unknown>): HourlyActivityPoint[] {
+  const arr = getArray(p, 'hourly_activity')
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }))
+
+  for (let i = 0; i < arr.length; i += 1) {
+    const item = arr[i]
+
+    if (typeof item === 'number') {
+      if (i >= 0 && i < 24) byHour[i] = { hour: i, count: asNumber(item, 0) }
+      continue
+    }
+
+    const rec = asRecord(item)
+    if (!rec) continue
+
+    const hour = getNumber(rec, 'hour', i)
+    const count = getNumber(rec, 'count', 0)
+
+    if (hour >= 0 && hour < 24) byHour[hour] = { hour, count }
+  }
+
+  return byHour
 }
 
 export function getNightRatio(p: Record<string, unknown>): { count: number; ratio: number } {

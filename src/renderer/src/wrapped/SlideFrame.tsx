@@ -3,7 +3,7 @@ import React from 'react'
 
 type Props = {
   kicker?: string
-  title: string
+  title: React.ReactNode
   subtitle?: string
   footerHint?: string
   children: React.ReactNode

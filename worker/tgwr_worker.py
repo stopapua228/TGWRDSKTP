@@ -1775,6 +1775,67 @@ def _distinct_days_count(conn: sqlite3.Connection, start_ts: int, end_ts: int) -
     return int(row[0] or 0) if row else 0
 
 
+def _hourly_activity(conn: sqlite3.Connection, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+    base, p = _period_where_clause(start_ts, end_ts)
+    counts: List[int] = [0] * 24
+    q = (
+        f"SELECT CAST(strftime('%H', (date_ts + {MSK_OFFSET_SECONDS}), 'unixepoch') AS INTEGER) AS h, COUNT(*) AS cnt "
+        f"FROM messages WHERE is_service = 0 AND {base} "
+        f"GROUP BY h ORDER BY h;"
+    )
+
+    for row in conn.execute(q, p):
+        try:
+            hour = int(row[0] or 0)
+            cnt = int(row[1] or 0)
+        except Exception:
+            continue
+        if 0 <= hour < 24:
+            counts[hour] = cnt
+
+    return [{"hour": int(hour), "count": int(counts[hour])} for hour in range(24)]
+
+
+def _daily_activity(
+    conn: sqlite3.Connection,
+    start_ts: int,
+    end_ts: int,
+    fill_full_range: bool = False,
+) -> List[Dict[str, Any]]:
+    base, p = _period_where_clause(start_ts, end_ts)
+    q = (
+        f"SELECT date((date_ts + {MSK_OFFSET_SECONDS}), 'unixepoch') AS d, COUNT(*) AS cnt "
+        f"FROM messages WHERE is_service = 0 AND {base} "
+        f"GROUP BY d ORDER BY d;"
+    )
+
+    counts_by_date: Dict[str, int] = {}
+    for row in conn.execute(q, p):
+        d = row[0] if isinstance(row[0], str) else None
+        if not d:
+            continue
+        counts_by_date[d] = int(row[1] or 0)
+
+    if not counts_by_date:
+        return []
+
+    if not fill_full_range:
+        return [{"date": d, "count": int(cnt)} for d, cnt in sorted(counts_by_date.items())]
+
+    msk = _moscow_tzinfo()
+    start_date = datetime.fromtimestamp(int(start_ts), tz=msk).date()
+    end_date = datetime.fromtimestamp(int(max(start_ts, end_ts - 1)), tz=msk).date()
+
+    out: List[Dict[str, Any]] = []
+    cur = start_date
+    while cur <= end_date:
+        key = cur.isoformat()
+        out.append({"date": key, "count": int(counts_by_date.get(key, 0))})
+        cur += timedelta(days=1)
+
+    return out
+
+
 def _people_stats(conn: sqlite3.Connection, start_ts: int, end_ts: int) -> Dict[str, Dict[str, Any]]:
     base, p = _period_where_clause(start_ts, end_ts)
     sql = (
@@ -2422,9 +2483,9 @@ def _compute_period_metrics(
     person_streak = _longest_person_streak(conn, start_ts, end_ts)
 
     textm = _text_metrics_sent(conn, start_ts, end_ts)
-
-    textm = _text_metrics_sent(conn, start_ts, end_ts)
     media = _media_counts(conn, start_ts, end_ts)
+    daily_activity = _daily_activity(conn, start_ts, end_ts, fill_full_range=(label == "year"))
+    hourly_activity = _hourly_activity(conn, start_ts, end_ts)
 
     if label == "year":
         median_reply = int(reply_stats.get("global_median_year_seconds", 0) or 0)
@@ -2480,6 +2541,8 @@ def _compute_period_metrics(
         "most_active_day": most_day,
         "most_active_month": most_month,
         "most_active_hour": most_hour,
+        "daily_activity": daily_activity,
+        "hourly_activity": hourly_activity,
         "night_messages_count": int(night_messages),
         "night_messages_ratio": float(night_ratio),
         "media_counts": media,

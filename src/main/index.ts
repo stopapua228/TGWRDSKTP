@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import type { OpenDialogOptions } from 'electron'
 import { spawn } from 'node:child_process'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync, constants as fsConstants, promises as fsp } from 'node:fs'
@@ -108,7 +109,7 @@ function sendToWorker(cmdObj: unknown): void {
       type: 'worker_send_fail',
       message: 'Worker not running',
       ts: nowIso(),
-      cmd: isPlainObject(cmdObj) ? cmdObj : { valueType: typeof cmdObj }
+      cmd: isPlainObject(cmdObj) ? (cmdObj as JsonObject) : { valueType: typeof cmdObj }
     })
     return
   }
@@ -259,7 +260,6 @@ function startWorker(): void {
         scriptPath
       })
 
-      // Kick off a ping to detect the worker quickly in the UI.
       sendToWorker({ cmd: 'ping' })
     })
   }
@@ -308,9 +308,9 @@ function createWindow(): void {
       : undefined)
 
   if (!app.isPackaged && devUrl) {
-    win.loadURL(devUrl)
+    void win.loadURL(devUrl)
   } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
   win.on('closed', () => {
@@ -356,22 +356,24 @@ function isSafeFilename(name: string): boolean {
 
 ipcMain.handle(IPC_PICK_EXPORT_DIR, async () => {
   const parent = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined
-  const res = await dialog.showOpenDialog(parent, {
+  const options: OpenDialogOptions = {
     title: 'Select Telegram Desktop Export folder',
     properties: ['openDirectory', 'dontAddToRecent'],
     buttonLabel: 'Select folder'
-  })
+  }
+  const res = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
   if (res.canceled) return null
   return res.filePaths[0] ?? null
 })
 
 ipcMain.handle(IPC_PICK_OUTPUT_DIR, async () => {
   const parent = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined
-  const res = await dialog.showOpenDialog(parent, {
+  const options: OpenDialogOptions = {
     title: 'Select folder to export TGWR slides',
     properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
     buttonLabel: 'Select folder'
-  })
+  }
+  const res = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
   if (res.canceled) return null
   return res.filePaths[0] ?? null
 })
@@ -389,7 +391,6 @@ ipcMain.handle(IPC_WRITE_OUTPUT_FILE, async (_event, payload: unknown) => {
     if (dirPath.trim().length === 0) return { ok: false, error: 'dir_path is required' }
     if (!isSafeFilename(filename)) return { ok: false, error: 'Unsafe filename' }
 
-    // Normalize bytes
     let bytes: Uint8Array
     if (bytesAny instanceof Uint8Array) {
       bytes = bytesAny
@@ -413,7 +414,6 @@ ipcMain.handle(IPC_WRITE_OUTPUT_FILE, async (_event, payload: unknown) => {
 
 ipcMain.handle(IPC_LOAD_REPORT, async (_event, args: unknown) => {
   try {
-    // 1. Страховка аргументов: фронтенд может передать строку или объект
     let providedDbPath: string | null = null
     if (typeof args === 'string') {
       providedDbPath = args
@@ -429,14 +429,12 @@ ipcMain.handle(IPC_LOAD_REPORT, async (_event, args: unknown) => {
       db_path = computed.db_path
     }
 
-    // 2. ГЛАВНОЕ ИСПРАВЛЕНИЕ: Ищем именно 'report.json' в папке с базой данных, как это делает Python
     const report_path = join(dirname(db_path), 'report.json')
 
     if (!existsSync(report_path)) {
       return { ok: false, db_path, report_path, error: `report.json not found at: ${report_path}` }
     }
 
-    // 3. Читаем и отдаем
     const txt = await fsp.readFile(report_path, { encoding: 'utf8' })
     const report = JSON.parse(txt) as unknown
     return { ok: true, db_path, report_path, report }
@@ -499,7 +497,7 @@ app.on('before-quit', () => {
     try {
       workerProc.kill()
     } catch {
-      // no-op
+      //
     }
   }
 })
